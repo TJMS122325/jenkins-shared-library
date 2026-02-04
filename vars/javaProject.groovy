@@ -1,76 +1,55 @@
-def call(Map cfg = [:]) {
+def call(Map params = [:]) {
+    // Orchestrator: run small steps in sequence so template is modular
+    compileStep()
+    packageStep()
+    sonarStep()
+    unitTestStep()
+    publishStep()
+    notifyStep()
+}
 
-    // --------------------
-    // Config defaults
-    // --------------------
-    def skipTests     = cfg.get('skipTests', false)
-    def image         = cfg.get('image', null)
-    def mavenArgs     = cfg.get('mavenArgs', '')
-    def dockerPush    = cfg.get('dockerPush', false)
-    def dockerRegistry= cfg.get('dockerRegistry', '')
-    def appVersion    = cfg.get('version', env.BUILD_NUMBER)
-
-    // --------------------
-    // Build
-    // --------------------
-    stage('Build') {
-        sh "mvn -B clean package ${skipTests ? '-DskipTests' : ''} ${mavenArgs}"
+def compileStep() {
+    stage('Compile') {
+        echo 'Compiling with Maven'
+        sh 'mvn -B -DskipTests compile'
     }
+}
 
-    // --------------------
-    // Unit Tests
-    // --------------------
-    if (!skipTests) {
-        stage('Unit Tests') {
-            sh 'mvn -B test'
-            junit '**/target/surefire-reports/*.xml'
-        }
+def packageStep() {
+    stage('Package') {
+        echo 'Packaging artifact'
+        sh 'mvn -B -DskipTests package'
     }
+}
 
-    // --------------------
-    // SonarQube
-    // --------------------
-    if (env.SONAR_SERVER) {
-        stage('SonarQube Analysis') {
+def sonarStep() {
+    stage('Sonar') {
+        if (env.SONAR_SERVER) {
             withSonarQubeEnv(env.SONAR_SERVER) {
-                sh 'mvn sonar:sonar'
+                sh "mvn sonar:sonar -Dsonar.projectKey=${project?.artifact ?: 'app'} -Dsonar.projectName=${project?.artifact ?: 'app'}"
             }
-        }
-    } else {
-        echo 'SonarQube not configured, skipping'
-    }
-
-    // --------------------
-    // Docker Build
-    // --------------------
-    if (image) {
-        stage('Docker Build') {
-            sh "docker build -t ${image}:${appVersion} ."
-        }
-
-        // --------------------
-        // Docker Push (Optional)
-        // --------------------
-        if (dockerPush && dockerRegistry) {
-            stage('Docker Push') {
-                sh """
-                  docker tag ${image}:${appVersion} ${dockerRegistry}/${image}:${appVersion}
-                  docker push ${dockerRegistry}/${image}:${appVersion}
-                """
-            }
+        } else {
+            echo 'Sonar not configured; skipping'
         }
     }
+}
 
-    // --------------------
-    // Archive Artifacts
-    // --------------------
-    stage('Archive Artifacts') {
-        archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
+def unitTestStep() {
+    stage('Unit Tests') {
+        echo 'Running unit tests'
+        sh 'mvn -B test'
+        junit '**/target/surefire-reports/*.xml'
     }
+}
 
-    // --------------------
-    // Notify
-    // --------------------
+def publishStep() {
+    stage('Publish') {
+        echo 'Publishing artifact (simulated)'
+        archiveArtifacts artifacts: 'target/*.jar', fingerprint: true, allowEmptyArchive: true
+    }
+}
+
+def notifyStep() {
     stage('Notify') {
         echo "Build ${currentBuild.currentResult}: ${env.JOB_NAME} #${env.BUILD_NUMBER}"
     }
